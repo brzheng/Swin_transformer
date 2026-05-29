@@ -9,6 +9,31 @@ import config
 from utils.dataset import ClassificationDataset
 from models.swin_classifier import SwinPureClassifier
 
+class EarlyStopping:
+    def __init__(self, patience=8, delta=0.0):
+        """
+        Args:
+            patience (int): 忍耐轮数。如果连续这么多轮 Val Acc 都没有提升，就触发早停。
+            delta (float): 算作提升的最小变化量。通常设为 0。
+        """
+        self.patience = patience
+        self.delta = delta
+        self.counter = 0
+        self.best_acc = 0.0
+        self.early_stop = False
+
+    def __call__(self, val_acc):
+        # 如果当前的验证集准确率比历史最高还要高（超出 delta 阈值）
+        if val_acc > self.best_acc + self.delta:
+            self.best_acc = val_acc
+            self.counter = 0
+            return True       # 返回 True 提示 train.py 需要保存模型权重
+        else:
+            self.counter += 1 # 关键：没破纪录，计数器累加一轮
+            print(f"    早停提示: Val Acc 没有提升。持续轮数: {self.counter}/{self.patience}")
+            if self.counter >= self.patience:
+                self.early_stop = True # 触发早停信号
+            return False
 
 def train_one_epoch(model, dataloader, criterion, optimizer, scheduler, device):
     """训练一个 Epoch 的函数"""
@@ -115,6 +140,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.LR, weight_decay=0.05)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.EPOCHS, eta_min=1e-6)
+    early_stopping = EarlyStopping(patience=8, delta=0.0)
 
     # 核心训练与验证循环
     best_acc = 0.0
@@ -134,11 +160,16 @@ def main():
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc * 100:.2f}%")
         print(f"  Val Loss: {val_loss:.4f}   |   Val Acc: {val_acc * 100:.2f}%")
 
-        # 保存最优模型权重
-        if val_acc > best_acc:
-            best_acc = val_acc
+        # 使用早停机制来决定是否保存模型以及是否中断整个训练
+        is_best = early_stopping(val_acc)
+        # 保存表现最好的模型
+        if is_best:
             torch.save(model.state_dict(), config.SAVE_PATH)
-            print(f"保持当前最优模型！最高验证集准确率更新为: {best_acc * 100:.2f}%")
+            print(f"=> Saved best model with Val Acc: {val_acc:.4f}")
+
+        if early_stopping.early_stop:
+            print(f"触发早停机制！模型连续 {early_stopping.patience} 轮未提升，已强制中断训练以保护泛化性。")
+            break
 
     print(f"训练完成!")
     print(f"💾 最优模型权重已保存至: {config.SAVE_PATH}")
