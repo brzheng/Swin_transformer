@@ -172,7 +172,7 @@ def main():
             break
 
     print(f"训练完成!")
-    print(f"💾 最优模型权重已保存至: {config.SAVE_PATH}")
+    print(f"最优模型权重已保存至: {config.SAVE_PATH}")
 
 
 if __name__ == "__main__":
